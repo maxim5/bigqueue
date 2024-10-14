@@ -1,0 +1,11 @@
+# https://jitpack.io/docs/BUILDING/
+
+jdk:
+  - openjdk21
+before_install:
+#  - ./custom_setup.sh
+install:
+  - cp gradle/wrapper/gradlew* .
+  - ./gradlew clean build publishToMavenLocal -xtest
+env:
+  key: "value"
