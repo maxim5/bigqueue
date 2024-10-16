@@ -1,5 +1,6 @@
 package io.spbx.storage.bigqueue.page;
 
+import io.spbx.storage.bigqueue.Timeouts;
 import io.spbx.util.io.UncheckedClosable;
 import io.spbx.util.testing.TestingBasics;
 import io.spbx.util.testing.TestingThreads;
@@ -20,9 +21,9 @@ import static io.spbx.util.func.ScopeFunctions.also;
 @Tag("slow") @Tag("integration")
 public class LRUCacheIntegrationTest {
     @RegisterExtension private static final CloseAllExtension CLOSE_ALL = new CloseAllExtension();
-    private static final int TIMEOUT_SMALL = 600;
-    private static final int TIMEOUT_MEDIUM = 1000;
-    private static final int TIMEOUT_FULL = 2000 + 10;
+    private static final int TIMEOUT_SMALL = Timeouts.timeout(600, 1000);
+    private static final int TIMEOUT_MEDIUM = Timeouts.timeout(1000, 1000);
+    private static final int TIMEOUT_FULL = Timeouts.timeout(2000 + 10, 2500);
 
     @Test
     public void single_thread() {

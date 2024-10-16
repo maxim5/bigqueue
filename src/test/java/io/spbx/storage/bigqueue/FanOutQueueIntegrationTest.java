@@ -19,7 +19,7 @@ public class FanOutQueueIntegrationTest {
     @RegisterExtension private static final TempDirectoryExtension TEMP_DIRECTORY = TempDirectoryExtension.withCleanup();
     private static final Logger log = Logger.forEnclosingClass();
     private static final String QUEUE_NAME = "queue_name";
-    private static final int TIMEOUT_SMALL = 200;
+    private static final int TIMEOUT_SMALL = Timeouts.timeout(200, 500);
 
     private final RandomData random = RandomData.withSharedSeed();
 

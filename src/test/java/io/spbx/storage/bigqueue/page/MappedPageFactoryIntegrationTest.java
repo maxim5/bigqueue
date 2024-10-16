@@ -1,6 +1,7 @@
 package io.spbx.storage.bigqueue.page;
 
 import io.spbx.storage.bigqueue.RandomData;
+import io.spbx.storage.bigqueue.Timeouts;
 import io.spbx.util.testing.TestSize;
 import io.spbx.util.testing.TestingBasics;
 import io.spbx.util.testing.TestingThreads;
@@ -29,8 +30,8 @@ public class MappedPageFactoryIntegrationTest {
     @RegisterExtension private static final CloseAllExtension CLOSE_ALL = new CloseAllExtension();
     private static final RandomData random = RandomData.seededForEachCallSite();
     private static final int TTL = 2 * 1000;
-    private static final int TIMEOUT_SMALL = 600;
-    private static final int TIMEOUT_FULL = 2000;
+    private static final int TIMEOUT_SMALL = Timeouts.timeout(600, 1000);
+    private static final int TIMEOUT_FULL = Timeouts.timeout(2000, 2500);
 
     @Test
     public void getBackPageFileSet_simple() {
