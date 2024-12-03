@@ -2,7 +2,6 @@ package io.spbx.storage.bigqueue;
 
 import io.spbx.storage.bigqueue.page.MappedPage;
 import io.spbx.storage.bigqueue.page.MappedPageFactory;
-import io.spbx.storage.bigqueue.page.MappedPageFactoryImpl;
 import io.spbx.util.logging.Logger;
 
 import java.io.UncheckedIOException;
@@ -15,7 +14,8 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
-import static io.spbx.util.base.BasicExceptions.newIllegalArgumentException;
+import static io.spbx.storage.bigqueue.page.MappedPageFactory.newMappedPageFactory;
+import static io.spbx.util.base.error.BasicExceptions.newIllegalArgumentException;
 
 /**
  * A big, fast and persistent queue implementation supporting fan out semantics.
@@ -339,7 +339,7 @@ public class FanOutQueueImpl implements FanOutQueue {
 		QueueFront(String fanoutId) {
 			this.fanoutId = validateFanoutId(fanoutId);
 			// the ttl does not matter here since queue front index page is always cached
-			indexPageFactory = new MappedPageFactoryImpl(
+			indexPageFactory = newMappedPageFactory(
 				QUEUE_FRONT_INDEX_PAGE_SIZE,
 				innerArray.arrayDirectory().resolve(QUEUE_FRONT_INDEX_PAGE_FOLDER_PREFIX + fanoutId),
 				innerArray.executor()

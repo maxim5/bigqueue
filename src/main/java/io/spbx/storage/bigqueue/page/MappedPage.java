@@ -1,5 +1,6 @@
 package io.spbx.storage.bigqueue.page;
 
+import io.spbx.util.base.ops.ByteOps;
 import io.spbx.util.io.UncheckedClosable;
 import io.spbx.util.io.UncheckedFlushable;
 
@@ -32,9 +33,7 @@ public interface MappedPage extends UncheckedFlushable, UncheckedClosable {
      */
     default byte[] getBufferBytes(int position, int length) {
         ByteBuffer buf = getLocalBuffer(position);
-        byte[] data = new byte[length];
-        buf.get(data);
-        return data;
+        return ByteOps.getBytes(buf, length);
     }
 
     /**
@@ -48,9 +47,14 @@ public interface MappedPage extends UncheckedFlushable, UncheckedClosable {
     long getPageIndex();
 
     /**
-     * Sets or unsets the dirty bit meaning that the mapped page has changed.
+     * Sets or unsets the dirty bit, i.e. whether the mapped page has changed.
      */
     void setDirty(boolean dirty);
+
+    /**
+     * Returns the dirty bit, i.e. whether the mapped page has changed.
+     */
+    boolean isDirty();
 
     /**
      * Returns whether this mapped page is closed.

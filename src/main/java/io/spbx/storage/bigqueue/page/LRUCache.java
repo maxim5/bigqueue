@@ -1,10 +1,10 @@
 package io.spbx.storage.bigqueue.page;
 
-import io.spbx.util.collect.IntSize;
+import io.spbx.util.collect.container.IntSize;
 import io.spbx.util.io.UncheckedClosable;
 
 import java.io.UncheckedIOException;
-import java.util.Collection;
+import java.util.function.Consumer;
 
 /**
  * LRU cache ADT.
@@ -44,14 +44,9 @@ interface LRUCache<K, V extends UncheckedClosable> extends IntSize {
      * This call increments the reference counter of the keyed resource.
      *
      * @param key the key of the cached resource
-     * @return cached resource if exists
+     * @return cached resource if exists or null otherwise
      */
     V get(K key);
-
-    /**
-     * Returns all cached values.
-     */
-    Collection<V> getValues();
 
     /**
      * Releases the cached resource with specific {@code key}.
@@ -61,6 +56,23 @@ interface LRUCache<K, V extends UncheckedClosable> extends IntSize {
      * @param key the key of the cached resource
      */
     void release(K key);
+
+    /**
+     * Returns whether the specific {@code key} is in the cache.
+     * <p>
+     * This call does not increment the reference counter of the keyed resource.
+     *
+     * @param key the key of the cached resource
+     * @return cached resource if exists or null otherwise
+     */
+    boolean contains(K key);
+
+    /**
+     * Iterates over the snapshot of the cached values.
+     * <p>
+     * This call does not increment the reference counter of the keyed resource.
+     */
+    void forEachValue(Consumer<V> consumer);
 
     /**
      * Removes the resource with specific {@code key} from the cache and closes it synchronously.

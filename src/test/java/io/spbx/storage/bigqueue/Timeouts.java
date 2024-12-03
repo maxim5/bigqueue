@@ -1,6 +1,7 @@
 package io.spbx.storage.bigqueue;
 
 import io.spbx.util.logging.Logger;
+import io.spbx.util.props.StandardProperties;
 import org.jetbrains.annotations.NotNull;
 
 import static io.spbx.util.func.ScopeFunctions.also;
@@ -24,6 +25,12 @@ public class Timeouts {
     }
 
     private static @NotNull Tier detectSystemTier() {
+        Tier property = StandardProperties.system().chainedWith(StandardProperties.env())
+            .getEnumOrNull("test.tier", Tier::valueOf);
+        if (property != null) {
+            return property;
+        }
+
         if (Env.isCI()) {
             return Tier.SLOW;   // assume low-level CI servers
         }

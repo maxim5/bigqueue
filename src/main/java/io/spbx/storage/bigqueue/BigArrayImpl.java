@@ -2,10 +2,12 @@ package io.spbx.storage.bigqueue;
 
 import io.spbx.storage.bigqueue.page.MappedPage;
 import io.spbx.storage.bigqueue.page.MappedPageFactory;
-import io.spbx.storage.bigqueue.page.MappedPageFactoryImpl;
+import io.spbx.util.base.error.BasicExceptions.IllegalStateExceptions;
+import io.spbx.util.base.ops.IntOps;
+import io.spbx.util.base.ops.LongOps;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.VisibleForTesting;
 
-import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
@@ -15,9 +17,11 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Consumer;
 
-import static io.spbx.util.base.BasicExceptions.newIllegalArgumentException;
-import static io.spbx.util.base.Unchecked.Suppliers.runRethrow;
+import static io.spbx.storage.bigqueue.page.MappedPageFactory.newMappedPageFactory;
+import static io.spbx.util.base.error.BasicExceptions.newIllegalArgumentException;
+import static io.spbx.util.base.error.Unchecked.Suppliers.runRethrow;
 
 /**
  * A big array implementation supporting sequential append and random read.
@@ -136,16 +140,54 @@ public class BigArrayImpl implements BigArray {
 
     private void commonInit() {
         // initialize page factories
-        indexPageFactory = new MappedPageFactoryImpl(INDEX_PAGE_SIZE, arrayDir.resolve(INDEX_PAGE_DIR), executor, INDEX_PAGE_CACHE_TTL);
-        dataPageFactory = new MappedPageFactoryImpl(DATA_PAGE_SIZE, arrayDir.resolve(DATA_PAGE_DIR), executor, DATA_PAGE_CACHE_TTL);
+        indexPageFactory = newMappedPageFactory(INDEX_PAGE_SIZE, arrayDir.resolve(INDEX_PAGE_DIR), executor, INDEX_PAGE_CACHE_TTL);
+        dataPageFactory = newMappedPageFactory(DATA_PAGE_SIZE, arrayDir.resolve(DATA_PAGE_DIR), executor, DATA_PAGE_CACHE_TTL);
         // the ttl does not matter here since metadata page is always cached
-        metaPageFactory = new MappedPageFactoryImpl(META_DATA_PAGE_SIZE, arrayDir.resolve(META_DATA_PAGE_DIR), executor);
+        metaPageFactory = newMappedPageFactory(META_DATA_PAGE_SIZE, arrayDir.resolve(META_DATA_PAGE_DIR), executor);
 
         // initialize array indexes
         initArrayIndex();
 
         // initialize data page indexes
         initDataPageIndex();
+    }
+
+    // find out array head/tail from the meta data
+    private void initArrayIndex() {
+        MappedPage metaDataPage = metaPageFactory.acquirePage(META_DATA_PAGE_INDEX);
+        ByteBuffer metaBuf = metaDataPage.getLocalBuffer();
+        long head = metaBuf.getLong();
+        long tail = metaBuf.getLong();
+
+        arrayHeadIndex.set(head);
+        arrayTailIndex.set(tail);
+    }
+
+    // find out data page head index and offset
+    private void initDataPageIndex() {
+        if (isEmpty()) {
+            headDataPageIndex = 0L;
+            headDataItemOffset = 0;
+        } else {
+            MappedPage previousIndexPage = null;
+            long previousIndexPageIndex = -1;
+            try {
+                long previousIndex = arrayHeadIndex.get() - 1;
+                previousIndexPageIndex = div(previousIndex, INDEX_ITEMS_PER_PAGE_BITS); // shift optimization
+                previousIndexPage = indexPageFactory.acquirePage(previousIndexPageIndex);
+                int previousIndexPageOffset = (int) (mul(mod(previousIndex, INDEX_ITEMS_PER_PAGE_BITS), INDEX_ITEM_LENGTH_BITS));
+                ByteBuffer previousIndexItemBuffer = previousIndexPage.getLocalBuffer(previousIndexPageOffset);
+                long previousDataPageIndex = previousIndexItemBuffer.getLong();
+                int previousDataItemOffset = previousIndexItemBuffer.getInt();
+                int previousDataItemLength = previousIndexItemBuffer.getInt();
+                headDataPageIndex = previousDataPageIndex;
+                headDataItemOffset = previousDataItemOffset + previousDataItemLength;
+            } finally {
+                if (previousIndexPage != null) {
+                    indexPageFactory.releasePage(previousIndexPageIndex);
+                }
+            }
+        }
     }
 
     Path arrayDirectory() {
@@ -165,110 +207,61 @@ public class BigArrayImpl implements BigArray {
     }
 
     @Override
-    public void removeAll() {
+    public long size() {
         try {
-            arrayWriteLock().lock();
-            indexPageFactory.deleteAllPages();
-            dataPageFactory.deleteAllPages();
-            metaPageFactory.deleteAllPages();
-            // FileUtil.deleteDirectory(new File(arrayDirectory));
-            commonInit();
+            arrayReadLock().lock();
+            return arrayHeadIndex.get() - arrayTailIndex.get();
         } finally {
-            arrayWriteLock().unlock();
+            arrayReadLock().unlock();
         }
     }
 
     @Override
-    public void removeBeforeIndex(long index) {
+    public int getDataPageSize() {
+        return DATA_PAGE_SIZE;
+    }
+
+    @Override
+    public long getHeadIndex() {
         try {
-            arrayWriteLock().lock();
-
-            validateIndex(index);
-
-            long indexPageIndex = div(index, INDEX_ITEMS_PER_PAGE_BITS);
-
-            ByteBuffer indexItemBuffer = getIndexItemBuffer(index);
-            long dataPageIndex = indexItemBuffer.getLong();
-
-            if (indexPageIndex > 0L) {
-                indexPageFactory.deletePagesBeforePageIndex(indexPageIndex);
-            }
-            if (dataPageIndex > 0L) {
-                dataPageFactory.deletePagesBeforePageIndex(dataPageIndex);
-            }
-
-            // advance the tail to index
-            arrayTailIndex.set(index);
+            arrayReadLock().lock();
+            return arrayHeadIndex.get();
         } finally {
-            arrayWriteLock().unlock();
+            arrayReadLock().unlock();
         }
     }
 
     @Override
-    public void removeBefore(long timestamp) {
+    public long getTailIndex() {
         try {
-            arrayWriteLock().lock();
-            long firstIndexPageIndex = indexPageFactory.getFirstPageIndexBefore(timestamp);
-            if (firstIndexPageIndex >= 0) {
-                //				long nextIndexPageIndex = firstIndexPageIndex;
-                //				if (nextIndexPageIndex == Long.MAX_VALUE) { //wrap
-                //					nextIndexPageIndex = 0L;
-                //				} else {
-                //					nextIndexPageIndex++;
-                //				}
-                long toRemoveBeforeIndex = mul(firstIndexPageIndex, INDEX_ITEMS_PER_PAGE_BITS);
-                removeBeforeIndex(toRemoveBeforeIndex);
-            }
-        } catch (IndexOutOfBoundsException e) {
-            // ignore
+            arrayReadLock().lock();
+            return arrayTailIndex.get();
         } finally {
-            arrayWriteLock().unlock();
+            arrayReadLock().unlock();
         }
     }
 
-    // find out array head/tail from the meta data
-    void initArrayIndex() {
-        MappedPage metaDataPage = metaPageFactory.acquirePage(META_DATA_PAGE_INDEX);
-        ByteBuffer metaBuf = metaDataPage.getLocalBuffer();
-        long head = metaBuf.getLong();
-        long tail = metaBuf.getLong();
-
-        arrayHeadIndex.set(head);
-        arrayTailIndex.set(tail);
-    }
-
-    // find out data page head index and offset
-    void initDataPageIndex() {
-        if (isEmpty()) {
-            headDataPageIndex = 0L;
-            headDataItemOffset = 0;
-        } else {
-            MappedPage previousIndexPage = null;
-            long previousIndexPageIndex = -1;
-            try {
-                long previousIndex = arrayHeadIndex.get() - 1;
-                previousIndexPageIndex = div(previousIndex, INDEX_ITEMS_PER_PAGE_BITS); // shift optimization
-                previousIndexPage = indexPageFactory.acquirePage(previousIndexPageIndex);
-                int previousIndexPageOffset = (int) (mul(mod(previousIndex, INDEX_ITEMS_PER_PAGE_BITS), INDEX_ITEM_LENGTH_BITS));
-                ByteBuffer previousIndexItemBuffer = previousIndexPage.getLocalBuffer(previousIndexPageOffset);
-                long previousDataPageIndex = previousIndexItemBuffer.getLong();
-                int previousDataItemOffset = previousIndexItemBuffer.getInt();
-                int perviousDataItemLength = previousIndexItemBuffer.getInt();
-
-                headDataPageIndex = previousDataPageIndex;
-                headDataItemOffset = previousDataItemOffset + perviousDataItemLength;
-            } finally {
-                if (previousIndexPage != null) {
-                    indexPageFactory.releasePage(previousIndexPageIndex);
-                }
-            }
-        }
-    }
-
-    /**
-     * Append the data into the head of the array
-     */
+    @Override
     public long append(byte[] data) {
+        return append(data.length, buf -> buf.put(data));
+    }
+
+    @Override
+    public long appendInt(int value) {
+        return append(Integer.BYTES, buf -> buf.putInt(value));
+    }
+
+    @Override
+    public long appendLong(long value) {
+        return append(Long.BYTES, buf -> buf.putLong(value));
+    }
+
+    @Override
+    public long appendByte(byte value) {
+        return append(Byte.BYTES, buf -> buf.put(value));
+    }
+
+    private long append(int dataLength, @NotNull Consumer<ByteBuffer> putOperation) {
         try {
             arrayReadLock().lock();
             MappedPage toAppendDataPage = null;
@@ -281,7 +274,7 @@ public class BigArrayImpl implements BigArray {
                 appendLock.lock(); // only one thread can append
 
                 // prepare the data pointer
-                if (headDataItemOffset + data.length > DATA_PAGE_SIZE) { // not enough space
+                if (headDataItemOffset + dataLength > DATA_PAGE_SIZE) { // not enough space
                     headDataPageIndex++;
                     headDataItemOffset = 0;
                 }
@@ -293,13 +286,12 @@ public class BigArrayImpl implements BigArray {
 
                 // append data
                 toAppendDataPage = dataPageFactory.acquirePage(toAppendDataPageIndex);
-                ByteBuffer toAppendDataPageBuffer = toAppendDataPage.getLocalBuffer(toAppendDataItemOffset);
-                toAppendDataPageBuffer.put(data);
+                putOperation.accept(toAppendDataPage.getLocalBuffer(toAppendDataItemOffset));
                 toAppendDataPage.setDirty(true);
                 // update to next
-                headDataItemOffset += data.length;
+                headDataItemOffset += dataLength;
 
-                toAppendIndexPageIndex = div(toAppendArrayIndex, INDEX_ITEMS_PER_PAGE_BITS); // shift optimization
+                toAppendIndexPageIndex = div(toAppendArrayIndex, INDEX_ITEMS_PER_PAGE_BITS);
                 toAppendIndexPage = indexPageFactory.acquirePage(toAppendIndexPageIndex);
                 int toAppendIndexItemOffset = (int) (mul(mod(toAppendArrayIndex, INDEX_ITEMS_PER_PAGE_BITS), INDEX_ITEM_LENGTH_BITS));
 
@@ -307,9 +299,8 @@ public class BigArrayImpl implements BigArray {
                 ByteBuffer toAppendIndexPageBuffer = toAppendIndexPage.getLocalBuffer(toAppendIndexItemOffset);
                 toAppendIndexPageBuffer.putLong(toAppendDataPageIndex);
                 toAppendIndexPageBuffer.putInt(toAppendDataItemOffset);
-                toAppendIndexPageBuffer.putInt(data.length);
-                long currentTime = System.currentTimeMillis();
-                toAppendIndexPageBuffer.putLong(currentTime);
+                toAppendIndexPageBuffer.putInt(dataLength);
+                toAppendIndexPageBuffer.putLong(System.currentTimeMillis());
                 toAppendIndexPage.setDirty(true);
 
                 // advance the head
@@ -339,25 +330,6 @@ public class BigArrayImpl implements BigArray {
     }
 
     @Override
-    public void flush() {
-        try {
-            arrayReadLock().lock();
-            //			try {
-            //				appendLock.lock(); // make flush and append mutually exclusive
-
-            metaPageFactory.flush();
-            indexPageFactory.flush();
-            dataPageFactory.flush();
-
-            //			} finally {
-            //				appendLock.unlock();
-            //			}
-        } finally {
-            arrayReadLock().unlock();
-        }
-
-    }
-
     public byte[] get(long index) {
         try {
             arrayReadLock().lock();
@@ -371,8 +343,7 @@ public class BigArrayImpl implements BigArray {
                 int dataItemOffset = indexItemBuffer.getInt();
                 int dataItemLength = indexItemBuffer.getInt();
                 dataPage = dataPageFactory.acquirePage(dataPageIndex);
-                byte[] data = dataPage.getBufferBytes(dataItemOffset, dataItemLength);
-                return data;
+                return dataPage.getBufferBytes(dataItemOffset, dataItemLength);
             } finally {
                 if (dataPage != null) {
                     dataPageFactory.releasePage(dataPageIndex);
@@ -383,36 +354,35 @@ public class BigArrayImpl implements BigArray {
         }
     }
 
-    public long getTimestamp(long index) {
+    @Override
+    public int getInt(long index) {
+        byte[] bytes = get(index);
+        IllegalStateExceptions.assure(bytes.length == Integer.BYTES, "Invalid number of bytes stored:", bytes.length);
+        return IntOps.valueOfBigEndianBytes(bytes);
+    }
+
+    @Override
+    public long getLong(long index) {
+        byte[] bytes = get(index);
+        IllegalStateExceptions.assure(bytes.length == Long.BYTES, "Invalid number of bytes stored:", bytes.length);
+        return LongOps.valueOfBigEndianBytes(bytes);
+    }
+
+    @Override
+    public byte getByte(long index) {
+        byte[] bytes = get(index);
+        IllegalStateExceptions.assure(bytes.length == Byte.BYTES, "Invalid number of bytes stored:", bytes.length);
+        return bytes[0];
+    }
+
+    @Override
+    public int getItemLength(long index) {
         try {
             arrayReadLock().lock();
             validateIndex(index);
-
-            ByteBuffer indexItemBuffer = getIndexItemBuffer(index);
-            // position to the timestamp
-            int position = indexItemBuffer.position();
-            indexItemBuffer.position(position + INDEX_ITEM_DATA_ITEM_TIMESTAMP_OFFSET);
-            long ts = indexItemBuffer.getLong();
-            return ts;
+            return getDataItemLength(index);
         } finally {
             arrayReadLock().unlock();
-        }
-    }
-
-    ByteBuffer getIndexItemBuffer(long index) {
-        MappedPage indexPage = null;
-        long indexPageIndex = -1L;
-        try {
-            indexPageIndex = div(index, INDEX_ITEMS_PER_PAGE_BITS); // shift optimization
-            indexPage = indexPageFactory.acquirePage(indexPageIndex);
-            int indexItemOffset = (int) (mul(mod(index, INDEX_ITEMS_PER_PAGE_BITS), INDEX_ITEM_LENGTH_BITS));
-
-            ByteBuffer indexItemBuffer = indexPage.getLocalBuffer(indexItemOffset);
-            return indexItemBuffer;
-        } finally {
-            if (indexPage != null) {
-                indexPageFactory.releasePage(indexPageIndex);
-            }
         }
     }
 
@@ -428,58 +398,40 @@ public class BigArrayImpl implements BigArray {
         }
     }
 
+    private int getDataItemLength(long index) {
+        ByteBuffer indexItemBuffer = getIndexItemBuffer(index);
+        int position = indexItemBuffer.position();                  // position to the data item length
+        indexItemBuffer.position(position + INDEX_ITEM_DATA_ITEM_LENGTH_OFFSET);
+        return indexItemBuffer.getInt();
+    }
+
     @Override
-    public long size() {
+    public long getTimestamp(long index) {
         try {
             arrayReadLock().lock();
-            return arrayHeadIndex.get() - arrayTailIndex.get();
+            validateIndex(index);
+            ByteBuffer indexItemBuffer = getIndexItemBuffer(index);
+            int position = indexItemBuffer.position();
+            indexItemBuffer.position(position + INDEX_ITEM_DATA_ITEM_TIMESTAMP_OFFSET);
+            return indexItemBuffer.getLong();
         } finally {
             arrayReadLock().unlock();
         }
     }
 
-    @Override
-    public long getHeadIndex() {
+    private ByteBuffer getIndexItemBuffer(long index) {
+        MappedPage indexPage = null;
+        long indexPageIndex = -1L;
         try {
-            arrayReadLock().lock();
-            return arrayHeadIndex.get();
+            indexPageIndex = div(index, INDEX_ITEMS_PER_PAGE_BITS);     // shift optimization
+            indexPage = indexPageFactory.acquirePage(indexPageIndex);
+            int indexItemOffset = (int) (mul(mod(index, INDEX_ITEMS_PER_PAGE_BITS), INDEX_ITEM_LENGTH_BITS));
+            return indexPage.getLocalBuffer(indexItemOffset);
         } finally {
-            arrayReadLock().unlock();
-        }
-    }
-
-    @Override
-    public long getTailIndex() {
-        try {
-            arrayReadLock().lock();
-            return arrayTailIndex.get();
-        } finally {
-            arrayReadLock().unlock();
-        }
-    }
-
-    @Override
-    public void close() {
-        try {
-            arrayWriteLock().lock();
-            if (metaPageFactory != null) {
-                metaPageFactory.releaseCachedPages();
+            if (indexPage != null) {
+                indexPageFactory.releasePage(indexPageIndex);
             }
-            if (indexPageFactory != null) {
-                indexPageFactory.releaseCachedPages();
-            }
-            if (dataPageFactory != null) {
-                dataPageFactory.releaseCachedPages();
-            }
-            executor.close();
-        } finally {
-            arrayWriteLock().unlock();
         }
-    }
-
-    @Override
-    public int getDataPageSize() {
-        return DATA_PAGE_SIZE;
     }
 
     @Override
@@ -514,18 +466,8 @@ public class BigArrayImpl implements BigArray {
     }
 
     private long closestBinarySearch(long low, long high, long timestamp) {
-        long mid;
-        long sum = low + high;
-        if (sum < 0) { // overflow
-            BigInteger bigSum = BigInteger.valueOf(low);
-            bigSum = bigSum.add(BigInteger.valueOf(high));
-            mid = bigSum.shiftRight(1).longValue();
-        } else {
-            mid = sum / 2;
-        }
-
+        long mid = LongOps.avg(low, high);
         long midTimestamp = getTimestamp(mid);
-
         if (midTimestamp < timestamp) {
             long nextLow = mid + 1;
             if (nextLow >= high) {
@@ -553,20 +495,24 @@ public class BigArrayImpl implements BigArray {
         }
     }
 
+    private long _getBackFileSize() {
+        return indexPageFactory.getBackPageFileSize() + dataPageFactory.getBackPageFileSize();
+    }
+
     @Override
     public void limitBackFileSize(long sizeLimit) {
         if (sizeLimit < INDEX_PAGE_SIZE + DATA_PAGE_SIZE) {
-            return; // ignore, one index page + one data page are minimum for big array to work correctly
+            return;     // ignore, one index page + one data page are minimum for big array to work correctly
         }
 
         long backFileSize = getBackFileSize();
         if (backFileSize <= sizeLimit) {
-            return; // nothing to do
+            return;     // nothing to do
         }
 
         long toTruncateSize = backFileSize - sizeLimit;
         if (toTruncateSize < DATA_PAGE_SIZE) {
-            return; // can't do anything
+            return;     // can't do anything
         }
 
         try {
@@ -578,7 +524,7 @@ public class BigArrayImpl implements BigArray {
 
             toTruncateSize = backFileSize - sizeLimit;
             if (toTruncateSize < DATA_PAGE_SIZE) {
-                return; // can't do anything
+                return;     // can't do anything
             }
 
             long tailIndex = arrayTailIndex.get();
@@ -591,7 +537,7 @@ public class BigArrayImpl implements BigArray {
 
                 tailIndex++;
 
-                if (mod(tailIndex, INDEX_ITEMS_PER_PAGE_BITS) == 0) { // take index page into account
+                if (mod(tailIndex, INDEX_ITEMS_PER_PAGE_BITS) == 0) {   // take index page into account
                     totalLength += INDEX_PAGE_SIZE;
                 }
             }
@@ -599,32 +545,103 @@ public class BigArrayImpl implements BigArray {
         } finally {
             arrayWriteLock().unlock();
         }
-
     }
 
     @Override
-    public int getItemLength(long index) {
+    public void removeAll() {
+        try {
+            arrayWriteLock().lock();
+            indexPageFactory.deleteAllPages();
+            dataPageFactory.deleteAllPages();
+            metaPageFactory.deleteAllPages();
+            // FileUtil.deleteDirectory(new File(arrayDirectory));
+            commonInit();
+        } finally {
+            arrayWriteLock().unlock();
+        }
+    }
+
+    @Override
+    public void removeBeforeIndex(long index) {
+        try {
+            arrayWriteLock().lock();
+            validateIndex(index);
+            long indexPageIndex = div(index, INDEX_ITEMS_PER_PAGE_BITS);
+
+            ByteBuffer indexItemBuffer = getIndexItemBuffer(index);
+            long dataPageIndex = indexItemBuffer.getLong();
+
+            if (indexPageIndex > 0L) {
+                indexPageFactory.deletePagesBeforePageIndex(indexPageIndex);
+            }
+            if (dataPageIndex > 0L) {
+                dataPageFactory.deletePagesBeforePageIndex(dataPageIndex);
+            }
+
+            arrayTailIndex.set(index);  // advance the tail to index
+        } finally {
+            arrayWriteLock().unlock();
+        }
+    }
+
+    @Override
+    public void removeBefore(long timestamp) {
+        try {
+            arrayWriteLock().lock();
+            long firstIndexPageIndex = indexPageFactory.getFirstPageIndexBefore(timestamp);
+            if (firstIndexPageIndex >= 0) {
+                //				long nextIndexPageIndex = firstIndexPageIndex;
+                //				if (nextIndexPageIndex == Long.MAX_VALUE) { //wrap
+                //					nextIndexPageIndex = 0L;
+                //				} else {
+                //					nextIndexPageIndex++;
+                //				}
+                long toRemoveBeforeIndex = mul(firstIndexPageIndex, INDEX_ITEMS_PER_PAGE_BITS);
+                removeBeforeIndex(toRemoveBeforeIndex);
+            }
+        } catch (IndexOutOfBoundsException e) {
+            // ignore
+        } finally {
+            arrayWriteLock().unlock();
+        }
+    }
+
+    @Override
+    public void flush() {
         try {
             arrayReadLock().lock();
-            validateIndex(index);
-            return getDataItemLength(index);
+            //			try {
+            //				appendLock.lock(); // make flush and append mutually exclusive
+
+            metaPageFactory.flush();
+            indexPageFactory.flush();
+            dataPageFactory.flush();
+
+            //			} finally {
+            //				appendLock.unlock();
+            //			}
         } finally {
             arrayReadLock().unlock();
         }
     }
 
-    private int getDataItemLength(long index) {
-        ByteBuffer indexItemBuffer = getIndexItemBuffer(index);
-        // position to the data item length
-        int position = indexItemBuffer.position();
-        indexItemBuffer.position(position + INDEX_ITEM_DATA_ITEM_LENGTH_OFFSET);
-        int length = indexItemBuffer.getInt();
-        return length;
-    }
-
-    // inner getBackFileSize
-    private long _getBackFileSize() {
-        return indexPageFactory.getBackPageFileSize() + dataPageFactory.getBackPageFileSize();
+    @Override
+    public void close() {
+        try {
+            arrayWriteLock().lock();
+            if (metaPageFactory != null) {
+                metaPageFactory.releaseCachedPages();
+            }
+            if (indexPageFactory != null) {
+                indexPageFactory.releaseCachedPages();
+            }
+            if (dataPageFactory != null) {
+                dataPageFactory.releaseCachedPages();
+            }
+            executor.close();
+        } finally {
+            arrayWriteLock().unlock();
+        }
     }
 
     /**

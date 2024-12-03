@@ -1,12 +1,15 @@
 package io.spbx.storage.bigqueue;
 
 import com.google.common.util.concurrent.ListenableFuture;
-import io.spbx.util.collect.LongSize;
+import io.spbx.util.base.annotate.CanIgnoreReturnValue;
+import io.spbx.util.base.annotate.CheckReturnValue;
+import io.spbx.util.collect.container.LongSize;
 import io.spbx.util.io.UncheckedClosable;
 import io.spbx.util.io.UncheckedFlushable;
 
 import java.io.UncheckedIOException;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * BigQueue ADT
@@ -21,18 +24,73 @@ public interface BigQueue extends LongSize, UncheckedFlushable, UncheckedClosabl
     /**
      * Adds a {@code data} item at the back of the queue.
      *
-     * @param data to be enqueued data
+     * @param data data to be enqueued
      * @throws UncheckedIOException if there was any I/O error during the operation
      */
     void enqueue(byte[] data) throws UncheckedIOException;
 
     /**
-     * Retrieves and removes the front of a queue
+     * Adds {@code value} at the back of the queue.
+     *
+     * @param value integer value to be enqueued
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     */
+    void enqueueInt(int value) throws UncheckedIOException;
+
+    /**
+     * Adds {@code value} at the back of the queue.
+     *
+     * @param value long value to be enqueued
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     */
+    void enqueueLong(long value) throws UncheckedIOException;
+
+    /**
+     * Adds {@code value} at the back of the queue.
+     *
+     * @param value byte value to be enqueued
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     */
+    void enqueueByte(byte value) throws UncheckedIOException;
+
+    /**
+     * Retrieves and removes the front of a queue as a {@code byte[]} array.
      *
      * @return data at the front of a queue
      * @throws UncheckedIOException if there was any I/O error during the operation
      */
+    @CheckReturnValue
     byte[] dequeue() throws UncheckedIOException;
+
+    /**
+     * Retrieves and removes the front of a queue as a {@code int} value.
+     *
+     * @return data at the front of a queue cast to an {@code int}
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     * @throws IllegalStateException if the front queue data can't be cast to an {@code int}
+     */
+    @CheckReturnValue
+    int dequeueInt() throws UncheckedIOException, IllegalStateException;
+
+    /**
+     * Retrieves and removes the front of a queue as a {@code long} value.
+     *
+     * @return data at the front of a queue cast to an {@code long}
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     * @throws IllegalStateException if the front queue data can't be cast to an {@code long}
+     */
+    @CheckReturnValue
+    long dequeueLong() throws UncheckedIOException, IllegalStateException;
+
+    /**
+     * Retrieves and removes the front of a queue as a {@code byte} value.
+     *
+     * @return data at the front of a queue cast to an {@code byte}
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     * @throws IllegalStateException if the front queue data can't be cast to an {@code byte}
+     */
+    @CheckReturnValue
+    byte dequeueByte() throws UncheckedIOException, IllegalStateException;
 
     /**
      * Retrieves a Future which will complete if new Items where enqued.
@@ -42,15 +100,8 @@ public interface BigQueue extends LongSize, UncheckedFlushable, UncheckedClosabl
      *
      * @return a ListenableFuture which completes with the first entry if items are ready to be dequeued.
      */
+    @CheckReturnValue
     ListenableFuture<byte[]> dequeueAsync();
-
-    /**
-     * Removes all items from the queue.
-     * This method empties the queue and deletes all back page files.
-     *
-     * @throws UncheckedIOException if there was any I/O error during the operation
-     */
-    void removeAll() throws UncheckedIOException;
 
     /**
      * Returns the item at the front of a queue.
@@ -58,6 +109,7 @@ public interface BigQueue extends LongSize, UncheckedFlushable, UncheckedClosabl
      * @return data at the front of a queue
      * @throws UncheckedIOException if there was any I/O error during the operation
      */
+    @CheckReturnValue
     byte[] peek() throws UncheckedIOException;
 
     /**
@@ -67,7 +119,17 @@ public interface BigQueue extends LongSize, UncheckedFlushable, UncheckedClosabl
      *
      * @return a future returning the first item if available
      */
+    @CheckReturnValue
     ListenableFuture<byte[]> peekAsync();
+
+    /**
+     * Iterates over all items in a queue.
+     *
+     * @param predicate the predicate
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     */
+    @CanIgnoreReturnValue
+    <T extends Predicate<byte[]>> T iterate(T predicate) throws UncheckedIOException;
 
     /**
      * Iterates over all items in a queue.
@@ -75,7 +137,16 @@ public interface BigQueue extends LongSize, UncheckedFlushable, UncheckedClosabl
      * @param consumer the consumer
      * @throws UncheckedIOException if there was any I/O error during the operation
      */
-    void applyForEach(ItemConsumer consumer) throws UncheckedIOException;
+    @CanIgnoreReturnValue
+    <T extends Consumer<byte[]>> T forEach(T consumer) throws UncheckedIOException;
+
+    /**
+     * Removes all items from the queue.
+     * This method empties the queue and deletes all back page files.
+     *
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     */
+    void removeAll() throws UncheckedIOException;
 
     /**
      * Deletes all used data files to free disk space.
@@ -105,17 +176,4 @@ public interface BigQueue extends LongSize, UncheckedFlushable, UncheckedClosabl
      */
     @Override
     void flush() throws UncheckedIOException;
-
-    /**
-     * Item consumer interface.
-     */
-    interface ItemConsumer extends Consumer<byte[]> {
-        /**
-         * Method to be called for each data item in the queue.
-         *
-         * @param item queue item
-         * @throws UncheckedIOException if there was any I/O error during the operation
-         */
-        void accept(byte[] item) throws UncheckedIOException;
-    }
 }

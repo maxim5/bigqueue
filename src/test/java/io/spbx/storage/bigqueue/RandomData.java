@@ -1,8 +1,8 @@
 package io.spbx.storage.bigqueue;
 
-import io.spbx.util.base.BasicRandom.RandomStrings;
+import io.spbx.util.base.random.RandomStrings;
 import io.spbx.util.logging.Logger;
-import io.spbx.util.testing.Seeder;
+import io.spbx.util.testing.random.Seeder;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.concurrent.ThreadSafe;
@@ -31,6 +31,11 @@ public class RandomData {
     public static @NotNull RandomData withSharedSeed() {
         Random random = new Random(0);
         return new RandomData(random::nextInt);
+    }
+
+    public int randomInt(int bound) {
+        long seed = seeder.seed();
+        return new Random(seed).nextInt(bound);
     }
 
     public @NotNull String randomString(int len) {

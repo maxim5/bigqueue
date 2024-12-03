@@ -1,20 +1,22 @@
 package io.spbx.storage.bigqueue.page;
 
+import io.spbx.util.base.error.BasicExceptions.IllegalArgumentExceptions;
+import io.spbx.util.func.ScopeFunctions;
 import io.spbx.util.io.BasicIo;
 import io.spbx.util.io.UncheckedClosable;
 import io.spbx.util.logging.Logger;
 
+import javax.annotation.concurrent.ThreadSafe;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Consumer;
 
 /**
  * Simple and thread-safe LRU cache implementation,
@@ -26,67 +28,29 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * @param <K> key
  * @param <V> value
  */
+@ThreadSafe
 class LRUCacheImpl<K, V extends UncheckedClosable> implements LRUCache<K, V> {
     private static final Logger log = Logger.forEnclosingClass();
 
     private final ExecutorService executor;
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
-    private final Map<K, V> map = new HashMap<>();
-    private final Map<K, TTLValue> ttlMap = new HashMap<>();
+    private final Map<K, Entry<V>> map = new HashMap<>();
 
     public LRUCacheImpl(ExecutorService executor) {
         this.executor = executor;
     }
 
     public void put(K key, V value, long ttlMillis) {
-        Collection<V> valuesToClose;
+        List<V> valuesToClose;
         try {
             lock.writeLock().lock();
-            // trigger mark&sweep
-            valuesToClose = markAndSweep();
-            if (valuesToClose != null && valuesToClose.contains(value)) { // just be cautious
-                valuesToClose.remove(value);
-            }
-            map.put(key, value);
-            TTLValue ttl = new TTLValue(System.currentTimeMillis(), ttlMillis);
-            ttl.refCount.incrementAndGet();
-            ttlMap.put(key, ttl);
+            valuesToClose = markAndSweep();     // trigger mark&sweep before adding
+            Entry<V> existing = map.putIfAbsent(key, new Entry<>(value, ttlMillis));
+            IllegalArgumentExceptions.assure(existing == null, "Key already exists in cache:", key);
         } finally {
             lock.writeLock().unlock();
         }
-        if (valuesToClose != null && !valuesToClose.isEmpty()) {
-            log.info().log("Mark&Sweep found %d resources to close.".formatted(valuesToClose.size()));
-            executor.execute(new ValueCloser<>(valuesToClose));    // close resource asynchronously
-        }
-    }
-
-    /**
-     * A lazy mark and sweep, a separate thread can also do this.
-     */
-    private Collection<V> markAndSweep() {
-        Collection<V> valuesToClose = null;
-        Set<K> keysToRemove = new HashSet<>();
-        Set<K> keys = ttlMap.keySet();
-        long currentTS = System.currentTimeMillis();
-
-        // remove object with no reference and expired
-        for (K key : keys) {
-            TTLValue ttl = ttlMap.get(key);
-            if (ttl.refCount.get() <= 0 && (currentTS - ttl.lastAccessedTimestamp.get()) > ttl.ttl) {
-                keysToRemove.add(key);
-            }
-        }
-
-        if (!keysToRemove.isEmpty()) {
-            valuesToClose = new HashSet<>();
-            for (K key : keysToRemove) {
-                V v = map.remove(key);
-                valuesToClose.add(v);
-                ttlMap.remove(key);
-            }
-        }
-
-        return valuesToClose;
+        gc(valuesToClose);
     }
 
     @Override
@@ -103,14 +67,20 @@ class LRUCacheImpl<K, V extends UncheckedClosable> implements LRUCache<K, V> {
     public V get(K key) {
         try {
             lock.readLock().lock();
-            TTLValue ttl = ttlMap.get(key);
-            if (ttl != null) {
-                // Since the resource is acquired by calling thread,
-                // let's update last accessed timestamp and increment reference counting
-                ttl.lastAccessedTimestamp.set(System.currentTimeMillis());
-                ttl.refCount.incrementAndGet();
-            }
-            return map.get(key);
+            return ScopeFunctions.map(map.get(key), entry -> {
+                entry.acquire();
+                return entry.value;
+            });
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    @Override
+    public boolean contains(K key) {
+        try {
+            lock.readLock().lock();
+            return map.containsKey(key);
         } finally {
             lock.readLock().unlock();
         }
@@ -120,12 +90,7 @@ class LRUCacheImpl<K, V extends UncheckedClosable> implements LRUCache<K, V> {
     public void release(K key) {
         try {
             lock.readLock().lock();
-            TTLValue ttl = ttlMap.get(key);
-            if (ttl != null) {
-                // since the resource is released by calling thread
-                // let's decrement the reference counting
-                ttl.refCount.decrementAndGet();
-            }
+            ScopeFunctions.let(map.get(key), Entry::release);
         } finally {
             lock.readLock().unlock();
         }
@@ -135,10 +100,8 @@ class LRUCacheImpl<K, V extends UncheckedClosable> implements LRUCache<K, V> {
     public void removeAll() throws UncheckedIOException {
         try {
             lock.writeLock().lock();
-            Collection<V> valuesToClose = new ArrayList<>(map.values());
-            valuesToClose.forEach(UncheckedClosable::close);    // close synchronously
+            map.values().stream().map(e -> e.value).forEach(UncheckedClosable::close);  // close synchronously
             map.clear();
-            ttlMap.clear();
         } finally {
             lock.writeLock().unlock();
         }
@@ -148,46 +111,94 @@ class LRUCacheImpl<K, V extends UncheckedClosable> implements LRUCache<K, V> {
     public V remove(K key) throws UncheckedIOException {
         try {
             lock.writeLock().lock();
-            ttlMap.remove(key);
-            V value = map.remove(key);
-            BasicIo.Close.closeRethrow(value);    // close synchronously
-            return value;
+            return ScopeFunctions.map(map.remove(key), entry -> {
+                BasicIo.Close.closeRethrow(entry.value);                                // close synchronously
+                return entry.value;
+            });
         } finally {
             lock.writeLock().unlock();
         }
     }
 
     @Override
-    public Collection<V> getValues() {
+    public void forEachValue(Consumer<V> consumer) {
+        values().forEach(consumer);
+    }
+
+    List<V> values() {
         try {
             lock.readLock().lock();
-            return new ArrayList<>(map.values());
+            return map.values().stream().map(e -> e.value).toList();
         } finally {
             lock.readLock().unlock();
         }
     }
 
-    private static class TTLValue {
-        private final AtomicLong lastAccessedTimestamp;  // last accessed time
-        private final AtomicLong refCount = new AtomicLong(0);
-        private final long ttl;
-
-        public TTLValue(long ts, long ttl) {
-            this.lastAccessedTimestamp = new AtomicLong(ts);
-            this.ttl = ttl;
+    void gc() {
+        try {
+            lock.writeLock().lock();
+            gc(markAndSweep());
+        } finally {
+            lock.writeLock().unlock();
         }
     }
 
-    private static class ValueCloser<V extends UncheckedClosable> implements Runnable {
-        private final Collection<V> valuesToClose;
+    private void gc(List<V> values) {
+        if (!values.isEmpty()) {
+            log.info().log("Mark&Sweep found %d resources to close", values.size());
+            executor.submit(() -> {
+                values.forEach(BasicIo.Close::closeQuietly);                     // close resource asynchronously
+                log.debug().log("ResourceCloser closed %d resources", values.size());
+            });
+        }
+    }
 
-        public ValueCloser(Collection<V> valuesToClose) {
-            this.valuesToClose = valuesToClose;
+    /**
+     * A lazy mark and sweep, a separate thread can also do this.
+     */
+    private List<V> markAndSweep() {
+        long now = now();
+        List<K> keysToRemove = map.entrySet().stream().filter(e -> e.getValue().isExpired(now)).map(Map.Entry::getKey).toList();
+        if (keysToRemove.isEmpty()) {
+            return List.of();
         }
 
-        public void run() {
-            valuesToClose.forEach(BasicIo.Close::closeQuietly);
-            log.debug().log("ResourceCloser closed %d resources", valuesToClose.size());
+        List<V> valuesToClose = new ArrayList<>(keysToRemove.size());
+        for (K key : keysToRemove) {
+            Entry<V> entry = map.remove(key);
+            valuesToClose.add(entry.value);
         }
+        return valuesToClose;
+    }
+
+    private static class Entry<V> {
+        private final V value;
+        private final long ttl;
+        private final AtomicLong lastAccess = new AtomicLong(now());
+        private final AtomicLong refCount = new AtomicLong(1);          // auto-increment upon creation.
+
+        public Entry(V value, long ttl) {
+            this.value = value;
+            this.ttl = ttl;
+        }
+
+        // Updates last accessed timestamp and increment reference counter
+        void acquire() {
+            lastAccess.set(now());
+            refCount.incrementAndGet();
+        }
+
+        // Decrements the reference counter
+        void release() {
+            refCount.decrementAndGet();
+        }
+
+        boolean isExpired(long now) {
+            return refCount.get() <= 0 && now - lastAccess.get() > ttl;       // no reference and expired
+        }
+    }
+
+    private static long now() {
+        return System.currentTimeMillis();
     }
 }

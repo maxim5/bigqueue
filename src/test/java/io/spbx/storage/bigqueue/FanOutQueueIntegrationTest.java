@@ -11,7 +11,7 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import static com.google.common.truth.Truth.assertThat;
 import static io.spbx.storage.bigqueue.BigArrayImpl.MINIMUM_DATA_PAGE_SIZE;
 import static io.spbx.storage.bigqueue.TestingData.strBytesOf;
-import static io.spbx.util.base.BasicArrays.fill;
+import static io.spbx.util.base.ops.ObjArrayOps.fill;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @Tag("slow") @Tag("integration")

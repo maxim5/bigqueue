@@ -1,7 +1,7 @@
 package io.spbx.storage.bigqueue.perf;
 
 import io.spbx.util.logging.Logger;
-import io.spbx.util.testing.TestingThreads.ThreadWorker;
+import io.spbx.util.testing.concurrent.ThreadWorker;
 import io.spbx.util.time.TimeIt;
 
 import java.util.Queue;

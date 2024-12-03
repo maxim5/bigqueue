@@ -4,7 +4,8 @@ import io.spbx.util.io.UncheckedFlushable;
 
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
-import java.util.Set;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 /**
  * Memory mapped page management ADT
@@ -41,36 +42,27 @@ public interface MappedPageFactory extends UncheckedFlushable {
     /**
      * Deletes the mapped page with the specific {@code index}.
      * This call removes the page from the cache if it was cached and deletes the back file.
+     * <p>
+     * Thread unsafe, caller need synchronization.
      *
      * @throws UncheckedIOException if there was any I/O error during the operation
      */
     void deletePage(long index) throws UncheckedIOException;
 
     /**
-     * Delete mapped pages with the specific {@code indexes}.
-     * This call removes the pages from the cache if they were cached and deletes the back files.
-     *
-     * @throws UncheckedIOException if there was any I/O error during the operation
-     */
-    void deletePages(Set<Long> indexes) throws UncheckedIOException;
-
-    /**
      * Deletes all mapped pages currently available in this factory.
      * This call removes all cached pages from the cache and deletes the back files.
+     * <p>
+     * Thread unsafe, caller need synchronization.
      *
      * @throws UncheckedIOException if there was any I/O error during the operation
      */
     void deleteAllPages() throws UncheckedIOException;
 
     /**
-     * Removes all cached pages from the cache and closes resources associated with the cached pages.
-     *
-     * @throws UncheckedIOException if there was any I/O error during the operation
-     */
-    void releaseCachedPages() throws UncheckedIOException;
-
-    /**
      * Deletes all pages with last modified timestamp before the specific {@code timestamp}.
+     * <p>
+     * Thread unsafe, caller need synchronization.
      *
      * @throws UncheckedIOException if there was any I/O error during the operation
      */
@@ -78,15 +70,26 @@ public interface MappedPageFactory extends UncheckedFlushable {
 
     /**
      * Delete all pages before the specific {@code pageIndex}.
+     * <p>
+     * Thread unsafe, caller need synchronization.
      *
      * @throws UncheckedIOException if there was any I/O error during the operation
      */
     void deletePagesBeforePageIndex(long pageIndex) throws UncheckedIOException;
 
     /**
+     * Removes all cached pages from the cache and closes resources associated with the cached pages.
+     * <p>
+     * Thread unsafe, caller need synchronization.
+     *
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     */
+    void releaseCachedPages() throws UncheckedIOException;
+
+    /**
      * Returns the indexes of pages with last modified timestamp before the specific {@code timestamp}.
      */
-    Set<Long> getPageIndexSetBefore(long timestamp);
+    List<Long> getPageIndexesBefore(long timestamp);
 
     /**
      * Returns the last modified timestamp of the specified page {@code index}.
@@ -96,22 +99,19 @@ public interface MappedPageFactory extends UncheckedFlushable {
     /**
      * Returns the index of a page file with last modified timestamp closest to specific {@code timestamp}.
      */
-    long getFirstPageIndexBefore(long timestamp);
+    default long getFirstPageIndexBefore(long timestamp) {
+        return getPageIndexesBefore(timestamp).stream().mapToLong(index -> index).max().orElse(-1);
+    }
 
     /**
      * Returns the list of indexes of the currently existing back files.
      */
-    Set<Long> getExistingBackFileIndexSet();
-
-    /**
-     * Returns the current cache size in bytes.
-     */
-    int getCacheSize();
+    List<Long> getExistingBackFileIndexes();
 
     /**
      * Returns a set of the file names of the back page.
      */
-    Set<String> getBackPageFileSet();
+    List<String> getBackPageFiles();
 
     /**
      * Returns the total size of all page files.
@@ -119,8 +119,29 @@ public interface MappedPageFactory extends UncheckedFlushable {
     long getBackPageFileSize();
 
     /**
+     * Returns the current cache size in bytes.
+     */
+    int getCacheSize();
+
+    /**
      * Persists any changes onto the file system.
+     * <p>
+     * Thread unsafe, caller need synchronization.
      */
     @Override
     void flush();
+
+    /**
+     * Returns a new {@link MappedPageFactory} instance for the specified params.
+     */
+    static MappedPageFactory newMappedPageFactory(int pageSize, Path pageDir, ExecutorService executor, long cacheTTL) {
+        return new MappedPageFactoryImpl(pageSize, pageDir, executor, cacheTTL);
+    }
+
+    /**
+     * Returns a new {@link MappedPageFactory} instance for the specified params.
+     */
+    static MappedPageFactory newMappedPageFactory(int pageSize, Path pageDir, ExecutorService executor) {
+        return new MappedPageFactoryImpl(pageSize, pageDir, executor);
+    }
 }

@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "io.spbx"
-version = "0.1.0"
+version = "0.1.1"
 
 tasks.wrapper {
     gradleVersion = "8.10"
@@ -35,13 +35,13 @@ private val tutorial by sourceSets.creating
 dependencies {
     "tutorialCompileOnly"(main.output)
     "tutorialCompileOnly"("org.jetbrains:annotations:24.1.0")
-    "tutorialImplementation"("com.github.maxim5:java-basics:0.3.0")
+    "tutorialImplementation"("com.github.maxim5:java-basics:0.4.0")
     "tutorialRuntimeOnly"("com.google.flogger:flogger-log4j2-backend:0.8")
 }
 
 dependencies {
     api("com.google.guava:guava:33.2.0-jre")
-    api("com.github.maxim5:java-basics:0.3.0")
+    api("com.github.maxim5:java-basics:0.4.0")
     compileOnly("org.jetbrains:annotations:24.1.0")
     implementation("com.google.flogger:flogger:0.8")
 }
@@ -52,7 +52,7 @@ dependencies {
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")
 
     testCompileOnly("org.jetbrains:annotations:24.1.0")
-    testImplementation("com.github.maxim5:java-basics:0.3.0:test-fixtures")
+    testImplementation("com.github.maxim5:java-basics:0.4.0:test-fixtures")
     testRuntimeOnly("com.google.flogger:flogger-log4j2-backend:0.8")
 
     testImplementation("com.google.truth:truth:1.4.2")

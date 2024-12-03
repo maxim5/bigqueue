@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.google.common.truth.Truth.assertThat;
 
-@Tag("slow") @Tag("integration") @Tag("perf")
+@Tag("extended") @Tag("integration")
 public class BigQueuePerfTest {
     @RegisterExtension private static final TempDirectoryExtension TEMP_DIRECTORY = TempDirectoryExtension.withCleanup();
     private static final Logger log = Logger.forEnclosingClass();
@@ -43,7 +43,7 @@ public class BigQueuePerfTest {
 
     @Test
     public void perf_test() throws Exception {
-        TestSize.assumeTestSize(TestSize.STRESS);
+        TestSize.assumeTestSize(TestSize.EXTENDED);
         log.info().log("Performance test start...");
 
         try (BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME)) {

@@ -12,7 +12,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.maxim5:bigqueue:0.1.0")
+    implementation("com.github.maxim5:bigqueue:0.1.1")
 }
 ```
 

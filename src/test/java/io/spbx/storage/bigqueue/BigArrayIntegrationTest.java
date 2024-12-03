@@ -19,10 +19,11 @@ import java.util.concurrent.TimeUnit;
 import static com.google.common.truth.Truth.assertThat;
 import static io.spbx.storage.bigqueue.BigArrayImpl.*;
 import static io.spbx.storage.bigqueue.TestingData.strBytesOf;
-import static io.spbx.util.base.BasicArrays.fill;
+import static io.spbx.util.base.ops.ObjArrayOps.fill;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @Tag("slow") @Tag("integration")
+@SuppressWarnings("resource")
 public class BigArrayIntegrationTest {
     @RegisterExtension private static final TempDirectoryExtension TEMP_DIRECTORY = TempDirectoryExtension.withCleanup();
     @RegisterExtension private static final CloseAllExtension CLOSE_ALL = new CloseAllExtension();
@@ -34,7 +35,6 @@ public class BigArrayIntegrationTest {
     @Test
     public void simple_ops_small() {
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
-        assertThat(bigArray).isNotNull();
 
         for (int i = 1; i <= 3; i++) {
             assertThat(bigArray.getTailIndex()).isEqualTo(0L);
@@ -69,7 +69,6 @@ public class BigArrayIntegrationTest {
     @Test
     public void removeBeforeIndex_big() {
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
-        assertThat(bigArray).isNotNull();
 
         int loop = 5000_000;
         for (int i = 0; i < loop; i++) {
@@ -95,7 +94,6 @@ public class BigArrayIntegrationTest {
     @Test
     public void removeBefore_big() {
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
-        assertThat(bigArray).isNotNull();
 
         int loop = 5000_000;
         for (int i = 0; i < loop; i++) {
@@ -114,7 +112,6 @@ public class BigArrayIntegrationTest {
         int loop = 1000_000;
 
         try (BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME)) {
-            assertThat(bigArray).isNotNull();
             long lastAppendTime = System.currentTimeMillis();
             for (int i = 0; i < loop; i++) {
                 bigArray.append(strBytesOf(i));
@@ -161,9 +158,8 @@ public class BigArrayIntegrationTest {
 
     @Test
     public void simple_access_timed() {
-        BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
-        assertThat(bigArray).isNotNull();
         int loop = 1000_000;
+        BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
         byte[][] data = fill(new byte[loop][], TestingData::strBytesOf);
 
         TimeIt.timeIt(() -> {
@@ -192,7 +188,6 @@ public class BigArrayIntegrationTest {
     @Test
     public void findClosestIndex_simple() {
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
-        assertThat(bigArray).isNotNull();
         assertThat(bigArray.findClosestIndex(System.currentTimeMillis())).isEqualTo(-1);
 
         int loop = 2000_000;
@@ -223,7 +218,6 @@ public class BigArrayIntegrationTest {
     @Test
     public void getBackFileSize_simple() {
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
-        assertThat(bigArray).isNotNull();
         assertThat(bigArray.getBackFileSize()).isEqualTo(0);
 
         bigArray.append("hello".getBytes());
@@ -247,7 +241,6 @@ public class BigArrayIntegrationTest {
     @Test
     public void limitBackFileSize_simple() {
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
-        assertThat(bigArray).isNotNull();
         assertThat(bigArray.getBackFileSize()).isEqualTo(0);
 
         bigArray.append("hello".getBytes());
@@ -290,7 +283,6 @@ public class BigArrayIntegrationTest {
     @Test
     public void getItemLength_simple() {
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
-        assertThat(bigArray).isNotNull();
 
         for (int i = 1; i <= 100; i++) {
             bigArray.append(random.randomBytes(i));
@@ -303,7 +295,6 @@ public class BigArrayIntegrationTest {
     }
 
     @Test
-    @SuppressWarnings("resource")
     public void invalid_data_page_size() {
         assertThrows(IllegalArgumentException.class, () -> {
             new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME, MINIMUM_DATA_PAGE_SIZE - 1);
@@ -311,9 +302,9 @@ public class BigArrayIntegrationTest {
     }
 
     @Test
-    @Tag("stress")
+    @Tag("extended")
     public void getBackFileSize_minimum_data_page_size() {
-        TestSize.assumeTestSize(TestSize.STRESS);
+        TestSize.assumeTestSize(TestSize.EXTENDED);
 
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME, MINIMUM_DATA_PAGE_SIZE);
         byte[] data = random.randomBytes(MINIMUM_DATA_PAGE_SIZE / (1024 * 1024));
@@ -339,9 +330,9 @@ public class BigArrayIntegrationTest {
     }
 
     @Test
-    @Tag("stress")
+    @Tag("extended")
     public void data_corruption() {
-        TestSize.assumeTestSize(TestSize.STRESS);
+        TestSize.assumeTestSize(TestSize.EXTENDED);
 
         long totalSize = 2L * 1024 * 1024 * 1024;
         int dataSize = 4096;
@@ -353,7 +344,6 @@ public class BigArrayIntegrationTest {
         Arrays.fill(data, (byte) 'a');
 
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME, pageSize);
-        assertThat(bigArray).isNotNull();
 
         newExecutor().scheduleAtFixedRate(() -> bigArray.limitBackFileSize(limitSize), 100, 100, TimeUnit.MILLISECONDS);
 
@@ -376,38 +366,6 @@ public class BigArrayIntegrationTest {
             ++count;
         }
         log.debug().log("count=%d", count);
-    }
-
-    @Test
-    public void mod_simple() {
-        assertThat(BigArrayImpl.mod(1024, 1)).isEqualTo(0);
-        assertThat(BigArrayImpl.mod(1024, 2)).isEqualTo(0);
-        assertThat(BigArrayImpl.mod(1024, 5)).isEqualTo(0);
-        assertThat(BigArrayImpl.mod(1024, 10)).isEqualTo(0);
-
-        assertThat(BigArrayImpl.mod(1025, 10)).isEqualTo(1);
-        assertThat(BigArrayImpl.mod(1027, 10)).isEqualTo(3);
-
-        assertThat(BigArrayImpl.mod(0, 10)).isEqualTo(0);
-
-        assertThat(BigArrayImpl.mod(Long.MAX_VALUE, 10)).isEqualTo(1023);
-        for (int i = 0; i <= 1023; i++) {
-            assertThat(BigArrayImpl.mod(Long.MAX_VALUE - i, 10)).isEqualTo(1023 - i);
-        }
-    }
-
-    @Test
-    public void mul_simple() {
-        for (int i = 0; i <= 60; i++) {
-            assertThat(BigArrayImpl.mul(Integer.MAX_VALUE, i)).isEqualTo(Integer.MAX_VALUE * (long) Math.pow(2, i));
-        }
-    }
-
-    @Test
-    public void div_simple() {
-        for (int i = 0; i <= 60; i++) {
-            assertThat(BigArrayImpl.div(Long.MAX_VALUE, i)).isEqualTo(Long.MAX_VALUE / (long) Math.pow(2, i));
-        }
     }
 
     private static ScheduledExecutorService newExecutor() {

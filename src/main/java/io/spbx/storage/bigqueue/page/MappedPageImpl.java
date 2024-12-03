@@ -2,11 +2,13 @@ package io.spbx.storage.bigqueue.page;
 
 import io.spbx.util.logging.Logger;
 
+import javax.annotation.concurrent.ThreadSafe;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.file.Path;
 
+@ThreadSafe
 class MappedPageImpl implements MappedPage {
     private static final Logger log = Logger.forEnclosingClass();
 
@@ -40,42 +42,43 @@ class MappedPageImpl implements MappedPage {
     }
 
     @Override
-    public boolean isClosed() {
-        return closed;
-    }
-
-    @Override
     public void setDirty(boolean dirty) {
         this.dirty = dirty;
     }
 
     @Override
-    public void flush() {
-        synchronized (this) {
-            if (closed) {
-                return;
-            }
-            if (dirty) {
-                MappedByteBuffer srcBuf = threadLocalBuffer.getSourceBuffer();
-                srcBuf.force();  // flush the changes
-                dirty = false;
-                log.debug().log("Mapped page for %s was just flushed", pageFile);
-            }
+    public boolean isDirty() {
+        return dirty;
+    }
+
+    @Override
+    public boolean isClosed() {
+        return closed;
+    }
+
+    @Override
+    public synchronized void flush() {
+        if (closed) {
+            return;
+        }
+        if (dirty) {
+            MappedByteBuffer srcBuf = threadLocalBuffer.getSourceBuffer();
+            srcBuf.force();  // flush the changes
+            dirty = false;
+            log.debug().log("Mapped page for %s was just flushed", pageFile);
         }
     }
 
     @Override
-    public void close() {
-        synchronized (this) {
-            if (closed) {
-                return;
-            }
-            flush();
-            unmap(threadLocalBuffer.getSourceBuffer());
-            threadLocalBuffer = null;  // hint GC
-            closed = true;
-            log.debug().log("Mapped page for %s was just unmapped and closed", pageFile);
+    public synchronized void close() {
+        if (closed) {
+            return;
         }
+        flush();
+        unmap(threadLocalBuffer.getSourceBuffer());
+        threadLocalBuffer = null;  // hint GC
+        closed = true;
+        log.debug().log("Mapped page for %s was just unmapped and closed", pageFile);
     }
 
     @Override

@@ -4,17 +4,23 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import io.spbx.storage.bigqueue.page.MappedPage;
 import io.spbx.storage.bigqueue.page.MappedPageFactory;
-import io.spbx.storage.bigqueue.page.MappedPageFactoryImpl;
+import io.spbx.util.base.error.BasicExceptions.IllegalStateExceptions;
+import io.spbx.util.base.ops.IntOps;
+import io.spbx.util.base.ops.LongOps;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+
+import static io.spbx.storage.bigqueue.page.MappedPageFactory.newMappedPageFactory;
 
 /**
  * A big, fast and persistent queue implementation.
- * <p/>
+ * <p>
  * Main features:
  * 1. FAST : close to the speed of direct memory access, both enqueue and dequeue are close to O(1) memory access.
  * 2. MEMORY-EFFICIENT : automatic paging & swapping algorithm, only most-recently accessed data is kept in memory.
@@ -70,7 +76,7 @@ public class BigQueueImpl implements BigQueue {
         innerArray = new BigArrayImpl(queueDir, queueName, pageSize);
 
         // the ttl does not matter here since queue front index page is always cached
-        queueFrontIndexPageFactory = new MappedPageFactoryImpl(
+        queueFrontIndexPageFactory = newMappedPageFactory(
             QUEUE_FRONT_INDEX_PAGE_SIZE,
             innerArray.arrayDirectory().resolve(QUEUE_FRONT_INDEX_PAGE_FOLDER),
             innerArray.executor()
@@ -83,6 +89,17 @@ public class BigQueueImpl implements BigQueue {
     }
 
     @Override
+    public long size() {
+        long qFront = queueFrontIndex.get();
+        long qRear = innerArray.getHeadIndex();
+        if (qFront <= qRear) {
+            return qRear - qFront;
+        } else {
+            return Long.MAX_VALUE - qFront + 1 + qRear;
+        }
+    }
+
+    @Override
     public boolean isEmpty() {
         return queueFrontIndex.get() == innerArray.getHeadIndex();
     }
@@ -90,6 +107,24 @@ public class BigQueueImpl implements BigQueue {
     @Override
     public void enqueue(byte[] data) {
         innerArray.append(data);
+        completeFutures();
+    }
+
+    @Override
+    public void enqueueInt(int value) {
+        innerArray.appendInt(value);
+        completeFutures();
+    }
+
+    @Override
+    public void enqueueLong(long value) {
+        innerArray.appendLong(value);
+        completeFutures();
+    }
+
+    @Override
+    public void enqueueByte(byte value) {
+        innerArray.appendByte(value);
         completeFutures();
     }
 
@@ -118,28 +153,33 @@ public class BigQueueImpl implements BigQueue {
         } finally {
             queueFrontWriteLock.unlock();
         }
+    }
 
+    @Override
+    public int dequeueInt() {
+        byte[] bytes = dequeue();
+        IllegalStateExceptions.assure(bytes.length == Integer.BYTES, "Invalid number of bytes stored:", bytes.length);
+        return IntOps.valueOfBigEndianBytes(bytes);
+    }
+
+    @Override
+    public long dequeueLong() {
+        byte[] bytes = dequeue();
+        IllegalStateExceptions.assure(bytes.length == Long.BYTES, "Invalid number of bytes stored:", bytes.length);
+        return LongOps.valueOfBigEndianBytes(bytes);
+    }
+
+    @Override
+    public byte dequeueByte() {
+        byte[] bytes = dequeue();
+        IllegalStateExceptions.assure(bytes.length == Byte.BYTES, "Invalid number of bytes stored:", bytes.length);
+        return bytes[0];
     }
 
     @Override
     public ListenableFuture<byte[]> dequeueAsync() {
         initializeDequeueFutureIfNecessary();
         return dequeueFuture;
-    }
-
-    @Override
-    public void removeAll() {
-        try {
-            queueFrontWriteLock.lock();
-            innerArray.removeAll();
-            queueFrontIndex.set(0L);
-            MappedPage queueFrontIndexPage = queueFrontIndexPageFactory.acquirePage(QUEUE_FRONT_PAGE_INDEX);
-            ByteBuffer queueFrontIndexBuffer = queueFrontIndexPage.getLocalBuffer();
-            queueFrontIndexBuffer.putLong(0L);
-            queueFrontIndexPage.setDirty(true);
-        } finally {
-            queueFrontWriteLock.unlock();
-        }
     }
 
     @Override
@@ -157,39 +197,52 @@ public class BigQueueImpl implements BigQueue {
     }
 
     @Override
-    public void applyForEach(ItemConsumer consumer) {
+    public <T extends Consumer<byte[]>> T forEach(T consumer) {
         try {
             queueFrontWriteLock.lock();
-            if (isEmpty()) {
-                return;
+            if (!isEmpty()) {
+                long index = queueFrontIndex.get();
+                for (long i = index; i < innerArray.size(); i++) {
+                    consumer.accept(innerArray.get(i));
+                }
             }
-            long index = queueFrontIndex.get();
-            for (long i = index; i < innerArray.size(); i++) {
-                consumer.accept(innerArray.get(i));
-            }
+            return consumer;
         } finally {
             queueFrontWriteLock.unlock();
         }
     }
 
     @Override
-    public void close() {
-        if (queueFrontIndexPageFactory != null) {
-            queueFrontIndexPageFactory.releaseCachedPages();
-        }
-
-        synchronized (futureLock) {
-            // Cancel the future but don't interrupt running tasks
-            // because they might perform further work not referring to the queue
-            if (peekFuture != null) {
-                peekFuture.cancel(false);
+    public <T extends Predicate<byte[]>> T iterate(T predicate) {
+        try {
+            queueFrontWriteLock.lock();
+            if (!isEmpty()) {
+                long index = queueFrontIndex.get();
+                for (long i = index; i < innerArray.size(); i++) {
+                    if (!predicate.test(innerArray.get(i))) {
+                        break;
+                    }
+                }
             }
-            if (dequeueFuture != null) {
-                dequeueFuture.cancel(false);
-            }
+            return predicate;
+        } finally {
+            queueFrontWriteLock.unlock();
         }
+    }
 
-        innerArray.close();
+    @Override
+    public void removeAll() {
+        try {
+            queueFrontWriteLock.lock();
+            innerArray.removeAll();
+            queueFrontIndex.set(0L);
+            MappedPage queueFrontIndexPage = queueFrontIndexPageFactory.acquirePage(QUEUE_FRONT_PAGE_INDEX);
+            ByteBuffer queueFrontIndexBuffer = queueFrontIndexPage.getLocalBuffer();
+            queueFrontIndexBuffer.putLong(0L);
+            queueFrontIndexPage.setDirty(true);
+        } finally {
+            queueFrontWriteLock.unlock();
+        }
     }
 
     @Override
@@ -219,14 +272,21 @@ public class BigQueueImpl implements BigQueue {
     }
 
     @Override
-    public long size() {
-        long qFront = queueFrontIndex.get();
-        long qRear = innerArray.getHeadIndex();
-        if (qFront <= qRear) {
-            return (qRear - qFront);
-        } else {
-            return Long.MAX_VALUE - qFront + 1 + qRear;
+    public void close() {
+        if (queueFrontIndexPageFactory != null) {
+            queueFrontIndexPageFactory.releaseCachedPages();
         }
+        synchronized (futureLock) {
+            // Cancel the future but don't interrupt running tasks
+            // because they might perform further work not referring to the queue
+            if (peekFuture != null) {
+                peekFuture.cancel(false);
+            }
+            if (dequeueFuture != null) {
+                dequeueFuture.cancel(false);
+            }
+        }
+        innerArray.close();
     }
 
     /**

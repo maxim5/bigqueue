@@ -1,7 +1,7 @@
 package io.spbx.storage.bigqueue.page;
 
-import io.spbx.util.testing.TestingThreads;
-import io.spbx.util.testing.TestingThreads.ThreadWorker;
+import io.spbx.util.testing.concurrent.TestingThreads;
+import io.spbx.util.testing.concurrent.ThreadWorker;
 import io.spbx.util.testing.ext.CloseAllExtension;
 import io.spbx.util.testing.ext.TempDirectoryExtension;
 import org.jetbrains.annotations.NotNull;
@@ -26,15 +26,15 @@ import static io.spbx.util.func.ScopeFunctions.also;
 public class MappedPageIntegrationTest {
     @RegisterExtension private static final TempDirectoryExtension TEMP_DIRECTORY = TempDirectoryExtension.withCleanup();
     @RegisterExtension private static final CloseAllExtension CLOSE_ALL = new CloseAllExtension();
-    private static final int TTL = 2 * 1000;
+    private static final int TTL = 1000;
 
     @Test
     public void single_thread() {
         int pageSize = 1024 * 1024 * 32;
         int loop = 10000;
-        MappedPageFactory mappedPageFactory = new MappedPageFactoryImpl(pageSize, currentTempDir(), newExecutor(), TTL);
+        MappedPageFactoryImpl factory = new MappedPageFactoryImpl(pageSize, currentTempDir(), newExecutor(), TTL);
 
-        MappedPage mappedPage = mappedPageFactory.acquirePage(0);
+        MappedPage mappedPage = factory.acquirePage(0);
         assertThat(mappedPage).isNotNull();
 
         also(mappedPage.getLocalBuffer(), buffer -> {
@@ -69,24 +69,25 @@ public class MappedPageIntegrationTest {
         int pageSize = 1024 * 1024 * 32;
         int threadNum = 100;
         int pageNumLimit = 50;
-        MappedPageFactory mappedPageFactory = new MappedPageFactoryImpl(pageSize, currentTempDir(), newExecutor(), TTL);
+        MappedPageFactoryImpl factory = new MappedPageFactoryImpl(pageSize, currentTempDir(), newExecutor(), TTL);
 
-        Set<MappedPage> pageSet = Collections.newSetFromMap(new ConcurrentHashMap<>());
-        List<ByteBuffer> localBufferList = Collections.synchronizedList(new ArrayList<>());
+        Set<MappedPage> pages = Collections.newSetFromMap(new ConcurrentHashMap<>());
+        List<ByteBuffer> localBuffers = Collections.synchronizedList(new ArrayList<>());
 
         Thread[] threads = new Thread[threadNum];
         for (int i = 0; i < threadNum; i++) {
-            threads[i] = new Worker(i, mappedPageFactory, pageNumLimit, pageSet, localBufferList).newThread();
+            threads[i] = new Worker(i, factory, pageNumLimit, pages, localBuffers).newThread();
         }
         TestingThreads.startAll(threads);
         TestingThreads.joinAll(threads);
-        assertThat(threadNum * pageNumLimit).isEqualTo(localBufferList.size());
-        assertThat(pageNumLimit).isEqualTo(pageSet.size());
+
+        assertThat(pages.size()).isEqualTo(pageNumLimit);
+        assertThat(localBuffers.size()).isEqualTo(threadNum * pageNumLimit);
 
         // Check thread locality
-        for (int i = 0; i < localBufferList.size(); i++) {
-            for (int j = i + 1; j < localBufferList.size(); j++) {
-                assertThat(localBufferList.get(j)).isNotSameInstanceAs(localBufferList.get(i));
+        for (int i = 0; i < localBuffers.size(); i++) {
+            for (int j = i + 1; j < localBuffers.size(); j++) {
+                assertThat(localBuffers.get(j)).isNotSameInstanceAs(localBuffers.get(i));
             }
         }
     }
@@ -94,13 +95,13 @@ public class MappedPageIntegrationTest {
     private record Worker(int id,
                           MappedPageFactory factory,
                           int pageNumLimit,
-                          Set<MappedPage> sharedPageSet,
-                          List<ByteBuffer> localBufferList) implements ThreadWorker {
+                          Set<MappedPage> sharedPages,
+                          List<ByteBuffer> localBuffers) implements ThreadWorker {
         @Override public void run() {
             for (int i = 0; i < pageNumLimit; i++) {
                 MappedPage page = factory.acquirePage(i);
-                sharedPageSet.add(page);
-                localBufferList.add(page.getLocalBuffer());
+                sharedPages.add(page);
+                localBuffers.add(page.getLocalBuffer());
 
                 int startPosition = id * 2048;
                 for (int j = 0; j < 100; j++) {

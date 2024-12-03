@@ -1,6 +1,8 @@
 package io.spbx.storage.bigqueue;
 
-import io.spbx.util.collect.LongSize;
+import io.spbx.util.base.annotate.CanIgnoreReturnValue;
+import io.spbx.util.base.annotate.CheckReturnValue;
+import io.spbx.util.collect.container.LongSize;
 import io.spbx.util.io.UncheckedClosable;
 import io.spbx.util.io.UncheckedFlushable;
 
@@ -15,34 +17,6 @@ public interface BigArray extends LongSize, UncheckedFlushable, UncheckedClosabl
      */
     @Override
     long size();
-
-    /**
-     * Appends the {@code data} into the head of the array.
-     *
-     * @param data binary data to append
-     * @return appended index
-     * @throws UncheckedIOException if there was any I/O error during the operation
-     */
-    long append(byte[] data) throws UncheckedIOException;
-
-    /**
-     * Returns the data at the specific {@code index}.
-     *
-     * @param index valid data index
-     * @return binary data if the index is valid
-     * @throws UncheckedIOException if there was any I/O error during the operation
-     */
-    byte[] get(long index) throws UncheckedIOException;
-
-    /**
-     * Returns the timestamp of data at the specific {@code index},
-     * i.e. the timestamp when the data was appended.
-     *
-     * @param index valid data index
-     * @return timestamp when the data was appended
-     * @throws UncheckedIOException if there was any I/O error during the operation
-     */
-    long getTimestamp(long index) throws UncheckedIOException;
 
     /**
      * Returns the back data file size per page.
@@ -71,30 +45,106 @@ public interface BigArray extends LongSize, UncheckedFlushable, UncheckedClosabl
     long getTailIndex();
 
     /**
-     * Removes all data in this array.
-     * This method empties the array and deletes all back page files.
+     * Appends the {@code data} into the head of the array.
      *
+     * @param data binary data to append
+     * @return appended index
      * @throws UncheckedIOException if there was any I/O error during the operation
      */
-    void removeAll() throws UncheckedIOException;
+    @CanIgnoreReturnValue
+    long append(byte[] data) throws UncheckedIOException;
 
     /**
-     * Removes all data before the yhe specific {@code index}.
-     * This method advances the array tail to {@code index} and deletes back page files before index.
+     * Appends the {@code value} into the head of the array.
      *
-     * @param index an index
+     * @param value integer value to append
+     * @return appended index
      * @throws UncheckedIOException if there was any I/O error during the operation
      */
-    void removeBeforeIndex(long index) throws UncheckedIOException;
+    @CanIgnoreReturnValue
+    long appendInt(int value) throws UncheckedIOException;
 
     /**
-     * Remove all data before the specific {@code timestamp}.
-     * This method advances the array tail and deletes back page files accordingly.
+     * Appends the {@code value} into the head of the array.
      *
-     * @param timestamp a timestamp
+     * @param value long value to append
+     * @return appended index
      * @throws UncheckedIOException if there was any I/O error during the operation
      */
-    void removeBefore(long timestamp) throws UncheckedIOException;
+    @CanIgnoreReturnValue
+    long appendLong(long value) throws UncheckedIOException;
+
+    /**
+     * Appends the {@code value} into the head of the array.
+     *
+     * @param value byte value to append
+     * @return appended index
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     */
+    @CanIgnoreReturnValue
+    long appendByte(byte value) throws UncheckedIOException;
+
+    /**
+     * Returns the data at the specific {@code index}.
+     *
+     * @param index valid data index
+     * @return binary data if the index is valid
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     */
+    @CheckReturnValue
+    byte[] get(long index) throws UncheckedIOException;
+
+    /**
+     * Returns the int value at the specific {@code index}.
+     *
+     * @param index valid data index
+     * @return integer value if the index is valid
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     * @throws IllegalStateException if the data at the specified {@code index} can't be cast to an {@code int}.
+     */
+    @CheckReturnValue
+    int getInt(long index) throws UncheckedIOException, IllegalStateException;
+
+    /**
+     * Returns the long value at the specific {@code index}.
+     *
+     * @param index valid data index
+     * @return long value if the index is valid
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     * @throws IllegalStateException if the data at the specified {@code index} can't be cast to a {@code long}.
+     */
+    @CheckReturnValue
+    long getLong(long index) throws UncheckedIOException, IllegalStateException;
+
+    /**
+     * Returns the byte value at the specific {@code index}.
+     *
+     * @param index valid data index
+     * @return byte value if the index is valid
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     * @throws IllegalStateException if the data at the specified {@code index} can't be cast to a {@code byte}.
+     */
+    @CheckReturnValue
+    byte getByte(long index) throws UncheckedIOException, IllegalStateException;
+
+    /**
+     * Returns the data item length at specific {@code index}.
+     *
+     * @param index valid data index
+     * @return the length of binary data if the index is valid
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     */
+    int getItemLength(long index) throws UncheckedIOException;
+
+    /**
+     * Returns the timestamp of data at the specific {@code index},
+     * i.e. the timestamp when the data was appended.
+     *
+     * @param index valid data index
+     * @return timestamp when the data was appended
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     */
+    long getTimestamp(long index) throws UncheckedIOException;
 
     /**
      * Returns the index of an item so that its append timestamp is closest
@@ -125,13 +175,30 @@ public interface BigArray extends LongSize, UncheckedFlushable, UncheckedClosabl
     void limitBackFileSize(long sizeLimit) throws UncheckedIOException;
 
     /**
-     * Returns the data item length at specific {@code index}.
+     * Removes all data in this array.
+     * This method empties the array and deletes all back page files.
      *
-     * @param index valid data index
-     * @return the length of binary data if the index is valid
      * @throws UncheckedIOException if there was any I/O error during the operation
      */
-    int getItemLength(long index) throws UncheckedIOException;
+    void removeAll() throws UncheckedIOException;
+
+    /**
+     * Removes all data before the yhe specific {@code index}.
+     * This method advances the array tail to {@code index} and deletes back page files before index.
+     *
+     * @param index an index
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     */
+    void removeBeforeIndex(long index) throws UncheckedIOException;
+
+    /**
+     * Remove all data before the specific {@code timestamp}.
+     * This method advances the array tail and deletes back page files accordingly.
+     *
+     * @param timestamp a timestamp
+     * @throws UncheckedIOException if there was any I/O error during the operation
+     */
+    void removeBefore(long timestamp) throws UncheckedIOException;
 
     /**
      * Forces to persist all newly appended data.

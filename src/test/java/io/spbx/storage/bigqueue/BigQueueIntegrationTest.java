@@ -11,16 +11,18 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import static com.google.common.truth.Truth.assertThat;
 import static io.spbx.storage.bigqueue.BigArrayImpl.MINIMUM_DATA_PAGE_SIZE;
 import static io.spbx.storage.bigqueue.TestingData.strBytesOf;
-import static io.spbx.util.base.BasicArrays.fill;
+import static io.spbx.util.base.ops.ObjArrayOps.fill;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.*;
 
 @Tag("slow") @Tag("integration")
+@SuppressWarnings("resource")
 public class BigQueueIntegrationTest {
     @RegisterExtension private static final TempDirectoryExtension TEMP_DIRECTORY = TempDirectoryExtension.withCleanup();
     private static final Logger log = Logger.forEnclosingClass();
@@ -88,9 +90,8 @@ public class BigQueueIntegrationTest {
 
     @Test
     public void simple_access_timed() {
-        BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME);
-        assertThat(bigQueue).isNotNull();
         int loop = 1000_000;
+        BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME);
         byte[][] data = fill(new byte[loop][], TestingData::strBytesOf);
 
         TimeIt.timeIt(() -> {
@@ -114,16 +115,15 @@ public class BigQueueIntegrationTest {
     }
 
     @Test
-    public void applyForEach_read_only() {
+    public void forEach_read_only() {
         BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
-        assertThat(bigQueue).isNotNull();
 
         bigQueue.enqueue("1".getBytes());
         bigQueue.enqueue("2".getBytes());
         bigQueue.enqueue("3".getBytes());
 
         DefaultItemConsumer consumer = new DefaultItemConsumer();
-        bigQueue.applyForEach(consumer);
+        bigQueue.forEach(consumer);
         assertThat(bigQueue.size()).isEqualTo(3);
         assertThat(consumer.count()).isEqualTo(3);
 
@@ -134,10 +134,9 @@ public class BigQueueIntegrationTest {
     }
 
     @Test
-    public void applyForEach_concurrent_write() throws Exception {
-        BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
-        assertThat(bigQueue).isNotNull();
+    public void forEach_concurrent_write() throws Exception {
         long loop = 100_000;
+        BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
 
         Thread publisher = new Thread(() -> {
             long item = 0;
@@ -162,7 +161,7 @@ public class BigQueueIntegrationTest {
 
         for (int i = 0; i < loop; i += (int) (loop / 100)) {
             DefaultItemConsumer consumer = new DefaultItemConsumer();
-            bigQueue.applyForEach(consumer);
+            bigQueue.forEach(consumer);
             TestingBasics.waitFor(2);
         }
 
@@ -173,7 +172,6 @@ public class BigQueueIntegrationTest {
     @Test
     public void dequeueAsync_future_completed_at_queue_listeners_called() throws Exception {
         BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
-        assertThat(bigQueue).isNotNull();
 
         Executor executor1 = mock(Executor.class);
         Executor executor2 = mock(Executor.class);
@@ -206,7 +204,6 @@ public class BigQueueIntegrationTest {
     @Test
     public void dequeueAsync_future_completed_listener_registered_later() {
         BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
-        assertThat(bigQueue).isNotNull();
 
         Executor executor = mock(Executor.class);
         bigQueue.enqueue("test".getBytes());
@@ -220,7 +217,6 @@ public class BigQueueIntegrationTest {
     @Test
     public void dequeueAsync_future_recreated_after_dequeue() {
         BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
-        assertThat(bigQueue).isNotNull();
 
         Executor executor = mock(Executor.class);
         bigQueue.enqueue("test".getBytes());
@@ -239,7 +235,6 @@ public class BigQueueIntegrationTest {
     @Test
     public void dequeueAsync_future_canceled_after_close() {
         BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
-        assertThat(bigQueue).isNotNull();
 
         Executor executor = mock(Executor.class);
         ListenableFuture<byte[]> future = bigQueue.dequeueAsync();
@@ -266,7 +261,6 @@ public class BigQueueIntegrationTest {
     @Test
     public void dequeueAsync_future_invalid_after_deletion() {
         BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
-        assertThat(bigQueue).isNotNull();
         bigQueue.enqueue("test".getBytes());
 
         Executor executor1 = mock(Executor.class);
@@ -288,7 +282,6 @@ public class BigQueueIntegrationTest {
     @Test
     public void dequeueAsync_peekAsync_concurrent() throws Exception {
         BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
-        assertThat(bigQueue).isNotNull();
 
         ListenableFuture<byte[]> dequeueFuture = bigQueue.dequeueAsync();
         ListenableFuture<byte[]> peekFuture = bigQueue.peekAsync();
@@ -304,7 +297,6 @@ public class BigQueueIntegrationTest {
     @Test
     public void peekAsync_concurrent() throws Exception {
         BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
-        assertThat(bigQueue).isNotNull();
 
         ListenableFuture<byte[]> peekFuture1 = bigQueue.peekAsync();
         bigQueue.enqueue("Test1".getBytes());
@@ -382,11 +374,11 @@ public class BigQueueIntegrationTest {
     }
     */
 
-    private static class DefaultItemConsumer implements BigQueue.ItemConsumer {
+    private static class DefaultItemConsumer implements Consumer<byte[]> {
         private long count = 0;
         private final StringBuilder builder = new StringBuilder(256);
 
-        public void accept(byte[] item) {
+        @Override public void accept(byte[] item) {
             if (count++ < 20) {
                 builder.append(new String(item)).append(", ");
             }

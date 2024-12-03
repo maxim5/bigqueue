@@ -1,6 +1,6 @@
 package io.spbx.storage.bigqueue;
 
-import io.spbx.util.collect.LongSize;
+import io.spbx.util.collect.container.LongSize;
 import io.spbx.util.io.UncheckedClosable;
 import io.spbx.util.io.UncheckedFlushable;
 
