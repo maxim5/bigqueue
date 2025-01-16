@@ -7,6 +7,7 @@ import io.spbx.storage.bigqueue.perf.TestingBigqueuePerf.PerfWorker;
 import io.spbx.storage.bigqueue.perf.TestingBigqueuePerf.Result;
 import io.spbx.storage.bigqueue.perf.TestingBigqueuePerf.Status;
 import io.spbx.util.logging.Logger;
+import io.spbx.util.testing.TestEnv;
 import io.spbx.util.testing.TestSize;
 import io.spbx.util.testing.TestingBasics;
 import io.spbx.util.testing.ext.TempDirectoryExtension;
@@ -42,6 +43,7 @@ public class BigArrayLoadTest {
     @Test
     public void load_test() throws Exception {
         TestSize.assumeTestSize(TestSize.EXTENDED);
+        TestEnv.assumeLinux("BigArray.removeAll()");
         log.info().log("Load test start...");
 
         try (BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME)) {

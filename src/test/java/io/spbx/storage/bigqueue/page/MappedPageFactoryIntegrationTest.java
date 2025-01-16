@@ -1,6 +1,8 @@
 package io.spbx.storage.bigqueue.page;
 
 import io.spbx.storage.bigqueue.RandomData;
+import io.spbx.util.concurrent.Uninterrupted;
+import io.spbx.util.testing.TestEnv;
 import io.spbx.util.testing.TestingBasics;
 import io.spbx.util.testing.concurrent.TestingThreads;
 import io.spbx.util.testing.concurrent.ThreadWorker;
@@ -59,6 +61,7 @@ public class MappedPageFactoryIntegrationTest {
 
     @Test
     public void single_thread() {
+        TestEnv.assumeLinux("MappedPageFactory.deletePage()");
         int pageSize = 128 * 1024 * 1024;
         int loop = 100;
         TraceExecutor executor = newExecutor();
@@ -114,6 +117,7 @@ public class MappedPageFactoryIntegrationTest {
 
     @Test
     public void single_thread_getPageIndexSetBefore() {
+        TestEnv.assumeLinux("MappedPageFactory.deletePagesBefore()");
         int pageSize = 128 * 1024 * 1024;
         MappedPageFactoryImpl factory = new MappedPageFactoryImpl(pageSize, currentTempDir(), newExecutor(), TTL);
 
@@ -242,7 +246,7 @@ public class MappedPageFactoryIntegrationTest {
     private record Worker(CountDownLatch latch, MappedPage[] pages, MappedPageFactory factory) implements ThreadWorker {
         @Override public void run() {
             latch.countDown();
-            TestingThreads.runSilently(latch::await);
+            Uninterrupted.runSilently(latch::await);
 
             List<Long> indexes = random.randomPermutation(pages.length);
             for (long i : indexes) {

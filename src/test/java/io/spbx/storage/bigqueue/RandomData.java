@@ -1,7 +1,7 @@
 package io.spbx.storage.bigqueue;
 
-import io.spbx.util.base.random.RandomStrings;
 import io.spbx.util.logging.Logger;
+import io.spbx.util.random.RandomStrings;
 import io.spbx.util.testing.random.Seeder;
 import org.jetbrains.annotations.NotNull;
 

@@ -7,11 +7,13 @@ import io.spbx.storage.bigqueue.perf.TestingBigqueuePerf.PerfWorker;
 import io.spbx.storage.bigqueue.perf.TestingBigqueuePerf.Result;
 import io.spbx.storage.bigqueue.perf.TestingBigqueuePerf.Status;
 import io.spbx.util.logging.Logger;
+import io.spbx.util.testing.TestEnv;
 import io.spbx.util.testing.TestSize;
 import io.spbx.util.testing.TestingBasics;
 import io.spbx.util.testing.ext.TempDirectoryExtension;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
 import java.util.Collections;
@@ -24,6 +26,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @Tag("extended") @Tag("integration")
 public class FanOutQueueLoadTest {
@@ -43,6 +46,7 @@ public class FanOutQueueLoadTest {
     @Test
     public void load_test() throws Exception {
         TestSize.assumeTestSize(TestSize.EXTENDED);
+        TestEnv.assumeLinux("FanOutQueue.removeAll()");
         log.info().log("Load test start...");
 
         try (FanOutQueue queue = new FanOutQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME)) {

@@ -1,6 +1,7 @@
 package io.spbx.storage.bigqueue;
 
 import io.spbx.util.logging.Logger;
+import io.spbx.util.testing.TestEnv;
 import io.spbx.util.testing.TestingBasics;
 import io.spbx.util.testing.ext.TempDirectoryExtension;
 import io.spbx.util.time.TimeIt;
@@ -194,6 +195,7 @@ public class FanOutQueueIntegrationTest {
 
     @Test
     public void removeBefore_simple() {
+        TestEnv.assumeLinux("FanOutQueue.removeBefore()");
         FanOutQueue queue = new FanOutQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
         assertThat(queue).isNotNull();
 
@@ -289,6 +291,7 @@ public class FanOutQueueIntegrationTest {
 
     @Test
     public void limitBackFileSize_simple() {
+        TestEnv.assumeLinux("FanOutQueue.limitBackFileSize()");
         FanOutQueue queue = new FanOutQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
         assertThat(queue).isNotNull();
 

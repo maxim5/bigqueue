@@ -2,6 +2,7 @@ package io.spbx.storage.bigqueue;
 
 import com.google.common.util.concurrent.ListenableFuture;
 import io.spbx.util.logging.Logger;
+import io.spbx.util.testing.TestEnv;
 import io.spbx.util.testing.TestingBasics;
 import io.spbx.util.testing.ext.TempDirectoryExtension;
 import io.spbx.util.time.TimeIt;
@@ -260,6 +261,7 @@ public class BigQueueIntegrationTest {
 
     @Test
     public void dequeueAsync_future_invalid_after_deletion() {
+        TestEnv.assumeLinux("BigQueue.removeAll()");
         BigQueue bigQueue = new BigQueueImpl(TEMP_DIRECTORY.currentTempDir(), QUEUE_NAME, MINIMUM_DATA_PAGE_SIZE);
         bigQueue.enqueue("test".getBytes());
 
