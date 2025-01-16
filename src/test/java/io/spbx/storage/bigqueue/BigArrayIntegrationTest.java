@@ -1,6 +1,7 @@
 package io.spbx.storage.bigqueue;
 
 import io.spbx.util.logging.Logger;
+import io.spbx.util.testing.TestEnv;
 import io.spbx.util.testing.TestSize;
 import io.spbx.util.testing.TestingBasics;
 import io.spbx.util.testing.ext.CloseAllExtension;
@@ -34,6 +35,7 @@ public class BigArrayIntegrationTest {
 
     @Test
     public void simple_ops_small() {
+        TestEnv.assumeLinux("BigArray.removeAll()");
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
 
         for (int i = 1; i <= 3; i++) {
@@ -68,6 +70,7 @@ public class BigArrayIntegrationTest {
 
     @Test
     public void removeBeforeIndex_big() {
+        TestEnv.assumeLinux("BigArray.removeBeforeIndex()");
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
 
         int loop = 5000_000;
@@ -93,6 +96,7 @@ public class BigArrayIntegrationTest {
 
     @Test
     public void removeBefore_big() {
+        TestEnv.assumeLinux("BigArray.removeBeforeIndex()");
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
 
         int loop = 5000_000;
@@ -217,6 +221,7 @@ public class BigArrayIntegrationTest {
 
     @Test
     public void getBackFileSize_simple() {
+        TestEnv.assumeLinux("BigArray.removeBeforeIndex()");
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
         assertThat(bigArray.getBackFileSize()).isEqualTo(0);
 
@@ -240,6 +245,7 @@ public class BigArrayIntegrationTest {
 
     @Test
     public void limitBackFileSize_simple() {
+        TestEnv.assumeLinux("BigArray.limitBackFileSize()");
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME);
         assertThat(bigArray.getBackFileSize()).isEqualTo(0);
 
@@ -304,6 +310,7 @@ public class BigArrayIntegrationTest {
     @Test
     @Tag("extended")
     public void getBackFileSize_minimum_data_page_size() {
+        TestEnv.assumeLinux("BigArray.removeBeforeIndex()");
         TestSize.assumeTestSize(TestSize.EXTENDED);
 
         BigArray bigArray = new BigArrayImpl(TEMP_DIRECTORY.currentTempDir(), ARRAY_NAME, MINIMUM_DATA_PAGE_SIZE);

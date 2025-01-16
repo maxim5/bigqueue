@@ -1,6 +1,7 @@
 package io.spbx.storage.bigqueue.page;
 
 import io.spbx.util.base.error.Unchecked;
+import io.spbx.util.concurrent.Uninterrupted;
 import io.spbx.util.func.LongScopeFunctions;
 import io.spbx.util.io.BasicFiles;
 import io.spbx.util.logging.Logger;
@@ -217,8 +218,6 @@ class MappedPageFactoryImpl implements MappedPageFactory {
 	}
 
     private static void tryToWait() {
-        try {
-            Thread.sleep(200);
-        } catch (InterruptedException ignore) {}
+        Uninterrupted.runSilently(() -> Thread.sleep(200));
     }
 }
